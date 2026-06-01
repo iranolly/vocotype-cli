@@ -10,12 +10,19 @@ import os
 # 模型版本，可通过环境变量覆盖
 MODEL_REVISION = os.environ.get("FUNASR_MODEL_REVISION", "v2.0.5")
 
-# 模型配置（默认使用 ONNX 版本，仍可通过环境变量覆盖）
+# Contextual Paraformer 本地缓存路径
+_CONTEXTUAL_MODEL_PATH = os.path.join(
+    os.path.expanduser("~"),
+    ".cache", "modelscope", "hub", "models", "iic",
+    "JunHowie_speech_paraformer-large-contextual_asr_nat-zh-cn-16k-common-vocab8404",
+)
+
+# 模型配置（默认使用 Contextual Paraformer PyTorch，支持热词偏置）
 MODELS = {
     "asr": {
         "name": os.environ.get(
             "FUNASR_ASR_MODEL",
-            "iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-onnx",
+            _CONTEXTUAL_MODEL_PATH,
         ),
         "type": "asr",
     },
@@ -35,6 +42,7 @@ MODELS = {
     },
 }
 
+
 # 获取模型列表（用于下载脚本）
 def get_models_for_download():
     """返回用于下载的模型配置列表"""
@@ -52,4 +60,3 @@ def get_models_for_download():
             "type": "punc",
         },
     ]
-

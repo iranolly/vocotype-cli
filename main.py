@@ -4,22 +4,23 @@ from __future__ import annotations
 
 import argparse
 import logging
-import threading
+import os
 import time
 
-import keyboard
+from pynput import keyboard as pynput_kb
 
-from app import HotkeyManager, TranscriptionResult, TranscriptionWorker, load_config, type_text
-from app.plugins.dataset_recorder import wrap_result_handler
+from app import TranscriptionResult, TranscriptionWorker, load_config, type_text
+from app.post_processor import PostProcessor
 from app.logging_config import setup_logging
+
+import pystray
+from PIL import Image, ImageDraw
 
 
 logger = logging.getLogger(__name__)
 
-
-_TOGGLE_DEBOUNCE_SECONDS = 0.2
-_toggle_lock = threading.Lock()
-_last_toggle_time = 0.0
+# 启动保护期（秒）：忽略此时间段内的所有 F9 按键，防止启动误触
+_STARTUP_GUARD_SECONDS = 2.0
 
 
 def parse_args() -> argparse.Namespace:
@@ -33,6 +34,30 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--save-dataset", action="store_true", help="Persist audio/text pairs")
     parser.add_argument("--dataset-dir", default="dataset", help="Dataset output directory")
     return parser.parse_args()
+
+
+def _cleanup_and_exit(worker):
+    """统一清理资源并退出。"""
+    try:
+        worker.stop()
+    except Exception:
+        pass
+    try:
+        worker.cleanup()
+    except Exception:
+        pass
+    logger.info("所有资源已清理，正常退出")
+    import sys
+    sys.exit(0)
+
+
+def _build_tray_icon():
+    """创建系统托盘图标。"""
+    img = Image.new("RGB", (16, 16), (0, 120, 212))
+    draw = ImageDraw.Draw(img)
+    draw.ellipse([1, 1, 14, 14], fill="white")
+    draw.polygon([(5, 5), (11, 5), (8, 11)], fill=(0, 120, 212))
+    return img
 
 
 def main() -> None:
@@ -51,52 +76,131 @@ def main() -> None:
     output_method = output_cfg.get("method", "auto")
     append_newline = output_cfg.get("append_newline", False)
 
+    # GPU 设备设置（如果配置了 device）
+    asr_cfg = config.get("asr", {})
+    device = asr_cfg.get("device", "")
+    if device:
+        os.environ["FUNASR_DEVICE"] = device
+        logger.info("设置 FunASR 设备为: %s", device)
+
+    # 初始化后处理管道（替换词典 + 专有名词 + AI 修正）
+    post_processor = PostProcessor(config)
+    hotword = post_processor.get_hotword()
+    if hotword:
+        asr_cfg = config.setdefault("asr", {})
+        existing = (asr_cfg.get("hotword") or "").strip()
+        if existing:
+            asr_cfg["hotword"] = existing + "," + hotword
+        else:
+            asr_cfg["hotword"] = hotword
+        logger.info("已注入 %d 个专有名词到 ASR hotword", len(post_processor.proper_nouns.get_words()))
+
     # 先创建worker（没有回调）
     worker = TranscriptionWorker(
         config_path=args.config,
         on_result=None,  # 稍后设置
     )
+    worker._post_processor = post_processor
     
     # 创建result handler（需要worker引用）
     worker.on_result = _make_result_handler(output_method, append_newline, worker)
     if args.save_dataset:
+        from app.plugins.dataset_recorder import wrap_result_handler
         worker.on_result = wrap_result_handler(worker.on_result, worker, args.dataset_dir)
-    
-    hotkeys = HotkeyManager()
 
-    toggle_combo = config["hotkeys"].get("toggle", "f2")
-    hotkeys.register(toggle_combo, lambda: _toggle(worker))
+    # 记录键盘监听器启动时间，用于启动保护期
+    _listener_started_at = None
 
-    try:
-        logger.info("Speak Keyboard 启动完成，按 %s 开始/停止录音，按 Ctrl+C 退出", toggle_combo)
-        if args.once:
-            _toggle(worker)
-            input("按 Enter 停止并退出...")
-            _toggle(worker)
-        else:
-            keyboard.wait()
-    except KeyboardInterrupt:
-        logger.info("用户中断，正在退出...")
-    finally:
-        # 清理所有资源
+    # PTT 模式：按住录音，松开识别（使用 pynput）
+    # Shift 键状态跟踪（用于 Shift+F9 长句模式）
+    _shift_pressed = [False]
+
+    def _on_press(key):
+        nonlocal _listener_started_at
         try:
+            # 跟踪 Shift 键
+            if key in (pynput_kb.Key.shift, pynput_kb.Key.shift_l, pynput_kb.Key.shift_r):
+                _shift_pressed[0] = True
+                return
+
+            if key == pynput_kb.Key.f9:
+                # 启动保护期：启动后前 N 秒忽略所有 F9，防止幽灵事件导致误触
+                if _listener_started_at is not None:
+                    elapsed = time.monotonic() - _listener_started_at
+                    if elapsed < _STARTUP_GUARD_SECONDS:
+                        logger.debug("启动保护期（%.1f秒），忽略 F9", _STARTUP_GUARD_SECONDS - elapsed)
+                        return
+
+                # 防重复：按住 F9 时键盘自动重复会多次触发 on_press
+                if worker.is_running:
+                    logger.debug("已在录音中，忽略重复 F9")
+                    return
+
+                is_long = _shift_pressed[0]
+                worker._long_mode = is_long
+                mode_name = "AI 润色" if is_long else "快速"
+                logger.info("开始录音（%s模式）", mode_name)
+                worker.start()
+        except Exception as exc:
+            logger.debug("键盘处理错误: %s", exc)
+
+    def _on_release(key):
+        try:
+            if key in (pynput_kb.Key.shift, pynput_kb.Key.shift_l, pynput_kb.Key.shift_r):
+                _shift_pressed[0] = False
+                return
+
+            if key == pynput_kb.Key.f9 and worker.is_running:
+                worker.stop()
+        except Exception:
+            pass
+
+    # 启动键盘监听器
+    _listener = pynput_kb.Listener(on_press=_on_press, on_release=_on_release)
+    _listener.daemon = True
+    _listener.start()
+    _listener_started_at = time.monotonic()
+
+    logger.info(
+        "Speak Keyboard 启动完成（启动保护期 %.0f 秒），按住 F9 录音（快速），按住 Shift+F9 录音（AI 润色）",
+        _STARTUP_GUARD_SECONDS,
+    )
+    if args.once:
+        # --once 模式：忽略启动保护期，立即开始
+        worker._long_mode = False
+        worker.start()
+        input("按 Enter 停止并退出...")
+        if worker.is_running:
             worker.stop()
-        except Exception as exc:
-            logger.debug("停止 worker 时出错: %s", exc)
-        
+        _cleanup_and_exit(worker)
+    else:
+        # 创建系统托盘图标
+        _has_tray = False
+        _tray_icon = None
         try:
-            worker.cleanup()
+            def _on_exit(icon, item):
+                """退出托盘图标（必须先 stop() 让图标消失，再让 run() 返回）"""
+                icon.stop()
+
+            _tray_icon = pystray.Icon(
+                "vocotype",
+                _build_tray_icon(),
+                "VocoType - 按住 F9 录音",
+                menu=pystray.Menu(
+                    pystray.MenuItem("退出", _on_exit, default=True)
+                ),
+            )
+            _has_tray = True
         except Exception as exc:
-            logger.debug("清理 worker 时出错: %s", exc)
+            logger.info("托盘图标不可用，键盘快捷键仍然正常工作: %s", exc)
+
+        if _has_tray and _tray_icon is not None:
+            _tray_icon.run()
+        else:
+            # 无图标模式：保持主线程运行
+            _listener.join()
         
-        try:
-            hotkeys.cleanup()
-        except Exception as exc:
-            logger.debug("清理热键时出错: %s", exc)
-        
-        logger.info("所有资源已清理，正常退出")
-        import sys
-        sys.exit(0)
+        _cleanup_and_exit(worker)
 
 
 def _make_result_handler(output_method: str, append_newline: bool, worker: TranscriptionWorker):
@@ -125,35 +229,5 @@ def _make_result_handler(output_method: str, append_newline: bool, worker: Trans
     return _handle_result
 
 
-def _toggle(worker: TranscriptionWorker) -> None:
-    global _last_toggle_time
-    now = time.monotonic()
-    with _toggle_lock:
-        if now - _last_toggle_time < _TOGGLE_DEBOUNCE_SECONDS:
-            logger.debug("忽略快速重复的录音切换请求 (%.3fs)", now - _last_toggle_time)
-            return
-        _last_toggle_time = now
-
-    if worker.is_running:
-        # 停止录音，提交转录任务
-        worker.stop()
-        stats = worker.transcription_stats
-        if stats["pending"] > 0:
-            logger.info(
-                "录音已停止并提交转录，队列中还有 %d 个任务等待处理",
-                stats["pending"]
-            )
-    else:
-        # 开始录音
-        stats = worker.transcription_stats
-        if stats["pending"] > 0:
-            logger.info(
-                "开始录音（后台还有 %d 个转录任务正在处理）",
-                stats["pending"]
-            )
-        worker.start()
-
-
 if __name__ == "__main__":
     main()
-

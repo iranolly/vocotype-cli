@@ -60,6 +60,27 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "method": "auto",
         "append_newline": False,
     },
+    "replacement_dict": {
+        "enabled": True,
+        "path": "config/replacement_dict.json",
+    },
+    "proper_nouns": {
+        "enabled": True,
+        "path": "config/proper_nouns.json",
+    },
+    "ai_correction": {
+        "enabled": False,
+        "provider": "remote",
+        "endpoint": "https://api.deepseek.com/v1/chat/completions",
+        "api_key": "",
+        "model": "deepseek-chat",
+        "timeout_ms": 15000,
+        "min_chars": 8,
+        "max_tokens": 256,
+        "temperature": 0.0,
+        "top_p": 0.9,
+        "system_prompt": "",
+    },
     "logging": {"dir": "logs", "level": "INFO"},
 }
 

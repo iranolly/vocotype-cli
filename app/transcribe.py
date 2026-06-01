@@ -79,6 +79,8 @@ class TranscriptionWorker:
         self._capture_thread: Optional[threading.Thread] = None
         self._state_lock = threading.RLock()
         self._audio_cfg = audio_cfg
+        self._post_processor = None  # 后处理管道（由外部注入）
+        self._long_mode = False  # 是否为 AI 润色模式
         self._buffer: list[np.ndarray] = []
         self._buffer_lock = threading.Lock()
         # 单次会话大小限制（字节）与计数器（配置健壮性：转换为正整型，非法回退至20MB）
@@ -398,6 +400,9 @@ class TranscriptionWorker:
         self.last_segment_path = recent_path
 
     def _transcribe_once(self, samples: np.ndarray) -> None:
+        # 每次转录前热加载替换词典和专有名词（运行时修改 JSON 立即生效）
+        if hasattr(self, '_post_processor') and self._post_processor is not None:
+            self._post_processor.reload()
         if self._backend == "volcengine":
             self._transcribe_once_volcengine(samples)
         else:
@@ -408,9 +413,15 @@ class TranscriptionWorker:
         tmp_path = self._write_temp_wav(samples)
         start = time.time()
         try:
+            asr_options = dict(self.config.get("asr", {}))
+            if hasattr(self, '_post_processor') and self._post_processor is not None:
+                pn_hotword = self._post_processor.get_hotword()
+                if pn_hotword:
+                    existing = (asr_options.get("hotword") or "").strip()
+                    asr_options["hotword"] = existing + "," + pn_hotword if existing else pn_hotword
             asr_result = self.fun_server.transcribe_audio(
                 tmp_path,
-                options=self.config.get("asr"),
+                options=asr_options,
             )
         finally:
             inference_latency = time.time() - start
@@ -463,6 +474,13 @@ class TranscriptionWorker:
                 inference_latency=inference_latency,
                 confidence=asr_result.get("confidence", 0.0),
             )
+
+        if result.text and hasattr(self, '_post_processor') and self._post_processor is not None:
+            long_mode = getattr(self, '_long_mode', False)
+            processed = self._post_processor.process(result.text, long_mode=long_mode)
+            if processed != result.text:
+                logger.info("后处理修正文本: '%s' -> '%s'", result.text[:80], processed[:80])
+                result.text = processed
 
         if self.on_result:
             try:

@@ -5,6 +5,10 @@ from .audio_capture import AudioCapture
 from .transcribe import TranscriptionWorker, TranscriptionResult
 from .hotkeys import HotkeyManager
 from .output import type_text
+from .post_processor import PostProcessor
+from .replacement_dict import ReplacementDict
+from .proper_nouns import ProperNouns
+from .ai_corrector import AICorrector
 
 __all__ = [
     "DEFAULT_CONFIG",
@@ -15,6 +19,10 @@ __all__ = [
     "TranscriptionResult",
     "HotkeyManager",
     "type_text",
+    "PostProcessor",
+    "ReplacementDict",
+    "ProperNouns",
+    "AICorrector",
 ]
 
 

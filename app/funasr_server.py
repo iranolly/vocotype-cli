@@ -116,52 +116,20 @@ class FunASRServer:
         try:
             model_name_lower = str(self.model_names["asr"]).lower()
             
-            # 如果是 ONNX 模型，使用 funasr_onnx 专用加载器
-            if "onnx" in model_name_lower:
-                from funasr_onnx.paraformer_bin import Paraformer
+            from funasr import AutoModel
 
-                logger.info("开始加载ASR ONNX模型: %s", self.model_names["asr"])
-                try:
-                    model_dir = get_model_cache_path(
-                        self.model_names["asr"],
-                        self.model_revision
-                    )
-                except Exception as e:
-                    logger.error("下载 ASR ONNX 模型失败: %s", e)
-                    return False
-
-                # 基本完整性校验，优先使用量化模型
-                quant_file = os.path.join(model_dir, "model_quant.onnx")
-                base_file = os.path.join(model_dir, "model.onnx")
-                use_quantize = False
-                if os.path.exists(quant_file):
-                    use_quantize = True
-                elif not os.path.exists(base_file):
-                    logger.error("ASR 模型目录缺少 model.onnx: %s", model_dir)
-                    return False
-
-                device_id = -1  # CPU
-                if self.device and "cuda" in self.device:
-                    try:
-                        device_id = int(self.device.split(":")[-1])
-                    except Exception:
-                        device_id = 0
-                
-                # 性能优化参数
-                num_threads = int(os.environ.get("OMP_NUM_THREADS", "8"))
-
-                self.asr_model = Paraformer(
-                    str(model_dir),
-                    batch_size=1,
-                    device_id=device_id,
-                    quantize=use_quantize,
-                    intra_op_num_threads=num_threads,  # 线程并行加速
-                )
-                logger.info("ASR ONNX模型加载完成")
-                return True
-            else:
-                logger.error("仅支持 ONNX 模型加载，当前模型名称: %s", self.model_names["asr"]) 
-                return False
+            model_name = self.model_names["asr"]
+            logger.info("加载ASR模型 (AutoModel/PyTorch): %s", model_name)
+            
+            device = self.device or "cpu"
+            self.asr_model = AutoModel(
+                model=model_name,
+                device=device,
+                disable_update=True,
+            )
+            self._asr_is_pytorch = True
+            logger.info("ASR模型加载完成 (model=%s, device=%s)", model_name, device)
+            return True
                 
         except Exception as e:
             logger.error(f"ASR模型加载失败: {str(e)}")
@@ -420,22 +388,23 @@ class FunASRServer:
                 logger.warning("use_vad=True 但VAD模型未加载，跳过VAD处理")
 
             # 执行ASR识别（根据模型类型使用不同接口）
-            if hasattr(self.asr_model, "generate"):
-                # PyTorch 模型使用 generate 方法
-                asr_result = self.asr_model.generate(
-                    input=audio_path,
-                    batch_size_s=default_options["batch_size_s"],
-                    hotword=default_options["hotword"],
-                    cache={},
-                )
+            # AutoModel/PyTorch 使用 generate 方法（支持 hotword）
+            hotword_str = default_options.get("hotword", "")
+            if hotword_str:
+                # AutoModel 的 hotword 以空格分隔，将逗号替换为空格
+                hotword_kw = hotword_str.replace(",", " ")
             else:
-                # ONNX 模型直接调用（funasr_onnx.Paraformer）
-                asr_result = self.asr_model([audio_path])
+                hotword_kw = ""
+            asr_result = self.asr_model.generate(
+                input=audio_path,
+                batch_size_s=default_options["batch_size_s"],
+                hotword=hotword_kw,
+                cache={},
+            )
 
-            # 提取识别文本（兼容 PyTorch 和 ONNX 两种格式）
+            # 提取识别文本（兼容 AutoModel/PyTorch 格式）
             if isinstance(asr_result, list) and len(asr_result) > 0:
                 first_item = asr_result[0]
-                # PyTorch 格式: [{"text": "..."}]
                 if isinstance(first_item, dict) and "text" in first_item:
                     raw_text = first_item["text"]
                 # ONNX 格式: [{"preds": (text_string, token_list)}]
@@ -469,15 +438,21 @@ class FunASRServer:
             duration = self._get_audio_duration(audio_path)
             self.transcription_count += 1
 
+            # 安全提取置信度（FunASR ONNX 可能返回空列表或异常对象）
+            try:
+                confidence_val = (
+                    getattr(asr_result[0], "confidence", 0.0)
+                    if isinstance(asr_result, list) and len(asr_result) > 0
+                    else 0.0
+                )
+            except (IndexError, AttributeError, TypeError):
+                confidence_val = 0.0
+
             result = {
                 "success": True,
                 "text": final_text,
                 "raw_text": raw_text,
-                "confidence": (
-                    getattr(asr_result[0], "confidence", 0.0)
-                    if isinstance(asr_result, list)
-                    else 0.0
-                ),
+                "confidence": confidence_val,
                 "duration": duration,
                 "language": "zh-CN",
                 "model_type": (
