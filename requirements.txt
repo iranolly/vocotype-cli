@@ -13,6 +13,18 @@ websockets>=12.0
 # 选其一或都装：用于 AutoModel 拉取/缓存模型
 modelscope==1.30.0
 
+# 运行时依赖（实际 import 需要）
+pypinyin==0.55.0
+pystray==0.19.5
+pynput==1.8.2
+pillow==12.2.0
+
+# GPU 依赖（PyTorch + CUDA 12.6）
+torch==2.12.0+cu126
+torchaudio==2.11.0+cu126
+funasr==1.3.2
+
 # 说明：
-# - 切换为 ONNX 路线（onnxruntime）；如需 GPU/PyTorch，请安装 torch(+cu) 与 torchaudio。
+# - ONNX 路线：onnxruntime 已由 funasr_onnx 依赖引入
+# - GPU 路线：torch(+cu) + torchaudio + funasr
 

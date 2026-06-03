@@ -1,0 +1,41 @@
+{
+  "audio": {
+    "sample_rate": 16000,
+    "block_ms": 20,
+    "device": null,
+    "max_session_bytes": 20971520
+  },
+  "backend": "funasr",
+  "asr": {
+    "device": "cuda:0",
+    "use_vad": false,
+    "use_punc": true,
+    "language": "zh",
+    "hotword": "",
+    "batch_size_s": 60.0
+  },
+  "output": {
+    "dedupe": true,
+    "max_history": 5,
+    "min_chars": 1,
+    "method": "auto",
+    "append_newline": false
+  },
+  "ai_correction": {
+    "enabled": false,
+    "provider": "remote",
+    "endpoint": "https://api.deepseek.com/v1/chat/completions",
+    "api_key": "",
+    "model": "deepseek-chat",
+    "timeout_ms": 15000,
+    "min_chars": 8,
+    "max_tokens": 256,
+    "temperature": 0.0,
+    "top_p": 0.9,
+    "system_prompt": "你是中文语音转写文本的后处理器。\n\n目标：在不改变原意、不新增事实的前提下，做最小必要修正，让文本通顺、自然、易读。\n\n仅允许：\n1. 补充/修改/删除标点\n2. 调整断句与分句\n3. 删除明显口头禅、重复词、无意义语气词\n4. 修正明显同音/近音错词、漏字、多字\n5. 原句明显不通顺时，做最小限度顺句\n\n核心约束：\n- 最小编辑：能不改就不改，能少改就少改\n- 含义守恒：不新增事实、细节、观点、结论\n- 技术字符串保真：英文、缩写、模型名、版本号、路径、命令、参数按原样保留\n- 数字规范：默认保留阿拉伯数字\n- 不确定时保留原样，避免误改\n\n输出要求：只输出最终文本，不要任何说明。"
+  },
+  "logging": {
+    "dir": "logs",
+    "level": "INFO"
+  }
+}

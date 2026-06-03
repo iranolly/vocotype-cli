@@ -6,6 +6,197 @@
 
 ---
 
+## 自动安装指南（面向 AI Agent）
+
+### 前置调查
+
+在开始安装前，agent **必须**依次完成以下调查并让用户确认：
+
+#### 1. GPU 环境
+
+```bash
+# 检查显卡、驱动、CUDA 版本
+nvidia-smi
+nvcc --version
+
+# 检查 Python 版本（需要 >=3.10）
+python --version
+```
+
+**必须确定的信息：**
+- GPU 型号、显存大小
+- 驱动版本、支持的 CUDA 版本
+- 已安装的 CUDA Toolkit 版本
+
+#### 2. 模型配置选择
+
+向用户确认以下选项：
+
+| 选项 | 默认值 | 说明 |
+|---|---|---|
+| ASR 后端 | `funasr`（本地离线） | 可选 `volcengine`（火山引擎云） |
+| 模型类型 | `contextual`（热词版） | 支持 hotword 偏置 |
+| 推理设备 | `cuda:0` | GPU 优先，无 GPU 则 `cpu` |
+| 模型格式 | `onnx`（量化） | 可选 `pytorch`（原始 PyTorch） |
+| 量化 | `True` | FP32 vs INT8 量化，节省显存 |
+
+**实际路径：** 若无用户明确指定，优先使用 ONNX 量化版加载到 GPU。若 GPU 显存 < 4GB 或无 CUDA，回退到 CPU + FP32。
+
+#### 3. AI 矫正提供商
+
+向用户确认：
+
+```json
+{
+  "enabled": false,
+  "provider": "remote",
+  "endpoint": "https://api.deepseek.com/v1/chat/completions",
+  "api_key": "",
+  "model": "deepseek-chat"
+}
+```
+
+- **endpoint**：OpenAI 兼容 API 地址（默认 DeepSeek）
+- **api_key**：用户提供的密钥
+- **model**：模型名（如 `deepseek-chat`、`gpt-4o` 等）
+- 如果用户说"不需要 AI 矫正"，保持 `enabled: false`
+
+---
+
+### 安装步骤
+
+安装虚拟环境与依赖时，**所有 pip 安装命令必须优先使用国内镜像源**，避免代理/TLS 问题。
+
+#### 1. 创建虚拟环境
+
+```bash
+cd /path/to/vocotype-cli
+uv venv --python 3.12
+```
+
+> 如果 `uv` 不可用，用 `python -m venv .venv`
+
+#### 2. 安装依赖
+
+```bash
+source .venv/bin/activate   # Linux/macOS
+# 或 .venv\Scripts\activate  # Windows cmd
+# 或 source .venv/Scripts/activate  # Windows git-bash
+
+# 使用镜像站（三选一，按速度排序）
+uv pip install -r requirements.txt \
+  -i https://mirrors.aliyun.com/pypi/simple/
+# 或 -i https://pypi.tuna.tsinghua.edu.cn/simple/
+# 或 -i https://mirror.sjtu.edu.cn/pypi/web/simple/
+```
+
+如果遇到 `tls handshake eof` 错误，说明本地代理（如 Clash/V2Ray）干扰了 Python 的 SSL 连接。解决方案：
+
+```bash
+# 方案 A：临时绕开代理
+env -u HTTP_PROXY -u HTTPS_PROXY uv pip install -r requirements.txt \
+  -i https://mirrors.aliyun.com/pypi/simple/
+
+# 方案 B：设置 NO_PROXY 排除 PyPI
+export NO_PROXY="pypi.org,pythonhosted.org,localhost,127.0.0.1"
+```
+
+#### 3. 安装 PyTorch（可选，仅当选择 PyTorch 模型时）
+
+```bash
+# 先检查 CUDA 版本
+nvidia-smi  # 查看支持的 CUDA 版本
+
+# CUDA 12.x
+uv pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu126
+
+# CUDA 11.8
+uv pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu118
+
+# CPU only
+uv pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+```
+
+> **注意：** torch CUDA 版 wheel 约 2.6GB，下载可能超时。推荐通过 curl 下载 wheel 文件后再本地安装，或换用镜像站。
+
+#### 4. 安装 ONNX Runtime GPU（默认路径）
+
+```bash
+# 先安装 CUDA 12 runtime（仅运行时 DLL，不覆盖本地 toolkit）
+uv pip install nvidia-cuda-runtime-cu12 \
+  -i https://mirrors.aliyun.com/pypi/simple/
+
+# 再安装 onnxruntime-gpu
+uv pip install onnxruntime-gpu \
+  -i https://mirrors.aliyun.com/pypi/simple/
+```
+
+> `onnxruntime-gpu` wheel 约 220MB，若超时可换清华镜像。
+
+#### 5. 配置模型
+
+复制示例配置并填入用户的信息：
+
+```bash
+cp config.example.json config.json
+```
+
+编辑 `config.json` 中的关键字段：
+
+```json
+{
+  "asr": {
+    "device": "cuda:0"
+  },
+  "ai_correction": {
+    "enabled": true,
+    "api_key": "sk-xxx",
+    "model": "deepseek-chat"
+  }
+}
+```
+
+#### 6. 下载 ASR 模型
+
+首次运行会自动从 modelscope 下载模型，但优先配置镜像：
+
+```bash
+cd /path/to/vocotype-cli
+.venv/bin/python -c "
+from modelscope.hub.snapshot_download import snapshot_download
+# ASR 模型
+snapshot_download('iic/speech_paraformer-large-contextual_asr_nat-zh-cn-16k-common-vocab8404', revision='v2.0.5')
+# 标点恢复模型
+snapshot_download('iic/punc_ct-transformer_zh-cn-common-vocab272727-onnx', revision='v2.0.5')
+"
+```
+
+#### 7. 验证安装
+
+```bash
+cd /path/to/vocotype-cli
+.venv/bin/python main.py --once --config config.json
+```
+
+如果所有模型加载成功，终端会输出 `所有FunASR模型并行初始化完成`。
+
+---
+
+## 快速启动
+
+双击 `start_vocotype_debug.bat`（Windows）或：
+
+```bash
+cd /path/to/vocotype-cli
+.venv/bin/python main.py --config config.json
+```
+
+- **按住 F9**：录音，松开即转录输出
+- **Shift + 按住 F9**：录音 + AI 润色后输出
+- 系统托盘图标右键 → 退出
+
+---
+
 ## 目录
 
 - [功能概览](#功能概览)

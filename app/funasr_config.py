@@ -11,18 +11,14 @@ import os
 MODEL_REVISION = os.environ.get("FUNASR_MODEL_REVISION", "v2.0.5")
 
 # Contextual Paraformer 本地缓存路径
-_CONTEXTUAL_MODEL_PATH = os.path.join(
-    os.path.expanduser("~"),
-    ".cache", "modelscope", "hub", "models", "iic",
-    "JunHowie_speech_paraformer-large-contextual_asr_nat-zh-cn-16k-common-vocab8404",
-)
+_CONTEXTUAL_MODEL = "iic/speech_paraformer-large-contextual_asr_nat-zh-cn-16k-common-vocab8404"
 
 # 模型配置（默认使用 Contextual Paraformer PyTorch，支持热词偏置）
 MODELS = {
     "asr": {
         "name": os.environ.get(
             "FUNASR_ASR_MODEL",
-            _CONTEXTUAL_MODEL_PATH,
+            _CONTEXTUAL_MODEL,
         ),
         "type": "asr",
     },

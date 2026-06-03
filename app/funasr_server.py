@@ -112,25 +112,36 @@ class FunASRServer:
         return "cpu"
 
     def _load_asr_model(self):
-        """加载ASR模型"""
+        """加载ASR模型（ONNX）"""
         try:
-            model_name_lower = str(self.model_names["asr"]).lower()
-            
-            from funasr import AutoModel
+            from funasr_onnx import ContextualParaformer
 
             model_name = self.model_names["asr"]
-            logger.info("加载ASR模型 (AutoModel/PyTorch): %s", model_name)
-            
-            device = self.device or "cpu"
-            self.asr_model = AutoModel(
-                model=model_name,
-                device=device,
-                disable_update=True,
+            logger.info("加载ASR模型 (ContextualParaformer/ONNX): %s", model_name)
+
+            model_dir = get_model_cache_path(model_name, self.model_revision)
+
+            # ONNX Runtime CUDA device: -1=CPU, 0=GPU
+            device_id = -1
+            if self.device and "cuda" in self.device:
+                try:
+                    device_id = int(self.device.split(":")[-1])
+                except Exception:
+                    device_id = 0
+
+            num_threads = int(os.environ.get("OMP_NUM_THREADS", "8"))
+
+            self.asr_model = ContextualParaformer(
+                str(model_dir),
+                batch_size=1,
+                device_id=device_id,
+                quantize=True,
+                intra_op_num_threads=num_threads,
             )
-            self._asr_is_pytorch = True
-            logger.info("ASR模型加载完成 (model=%s, device=%s)", model_name, device)
+            self._asr_is_pytorch = False
+            logger.info("ASR ONNX模型加载完成 (device_id=%s)", device_id)
             return True
-                
+
         except Exception as e:
             logger.error(f"ASR模型加载失败: {str(e)}")
             logger.debug(traceback.format_exc())
@@ -387,19 +398,15 @@ class FunASRServer:
             elif default_options["use_vad"] and not self.vad_model:
                 logger.warning("use_vad=True 但VAD模型未加载，跳过VAD处理")
 
-            # 执行ASR识别（根据模型类型使用不同接口）
-            # AutoModel/PyTorch 使用 generate 方法（支持 hotword）
+            # 执行ASR识别（ContextualParaformer/ONNX 使用 __call__）
             hotword_str = default_options.get("hotword", "")
             if hotword_str:
-                # AutoModel 的 hotword 以空格分隔，将逗号替换为空格
                 hotword_kw = hotword_str.replace(",", " ")
             else:
                 hotword_kw = ""
-            asr_result = self.asr_model.generate(
-                input=audio_path,
-                batch_size_s=default_options["batch_size_s"],
-                hotword=hotword_kw,
-                cache={},
+            asr_result = self.asr_model(
+                wav_content=audio_path,
+                hotwords=hotword_kw,
             )
 
             # 提取识别文本（兼容 AutoModel/PyTorch 格式）

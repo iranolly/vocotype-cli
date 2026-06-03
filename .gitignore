@@ -14,3 +14,6 @@ todo.md
 /models
 /scripts
 
+# Local config (has user's API keys)
+config.json
+
