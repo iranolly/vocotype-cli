@@ -43,6 +43,7 @@ class AICorrector:
         self.max_tokens = max(1, int(cfg.get("max_tokens", 256)))
         self.temperature = float(cfg.get("temperature", 0.0))
         self.top_p = float(cfg.get("top_p", 0.9))
+        self.extra_body = cfg.get("extra_body") or {}
         user_prompt = cfg.get("system_prompt")
         self.system_prompt = str(user_prompt).strip() if user_prompt else DEFAULT_SYSTEM_PROMPT
 
@@ -84,6 +85,8 @@ class AICorrector:
             "top_p": self.top_p,
             "stream": False,
         }
+        if self.extra_body:
+            payload.update(self.extra_body)
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         headers = {"Content-Type": "application/json", "Authorization": f"Bearer {self.api_key}"}
         request = urllib.request.Request(self.endpoint, data=data, headers=headers, method="POST")
