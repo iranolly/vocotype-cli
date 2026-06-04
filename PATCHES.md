@@ -54,6 +54,13 @@ model = AutoModel(model='iic/speech_paraformer-large-contextual_asr_nat-zh-cn-16
 - 切换提供商为 MiniMax CN（MiniMax-M3）
 - 增加自我纠正语义理解、结构化输出等规则
 
+### 7. ONNX ContextualParaformer 空热词崩溃
+
+**文件**: `app/funasr_server.py`  **方法**: `FunASRServer.transcribe_audio()`
+
+- ONNX ContextualParaformer 的 `proc_hotword()` 传入空字符串时返回空数组，导致 `IndexError: index -1 is out of bounds for axis 1 with size 0`
+- 修复：当 hotword 为空时传入占位字符 `"的"` 作为 dummy hotword
+
 ## 关键模型文件
 
 ONNX 模型缓存位置：

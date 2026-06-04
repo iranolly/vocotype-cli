@@ -33,6 +33,13 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "language": "zh",
         "hotword": "",
         "batch_size_s": 60.0,
+        # 本地 HTTP 端点 — 供 Hermes 等外部工具复用已加载的 FunASR 模型
+        "http_server": {
+            "enabled": True,          # 是否启动 HTTP 端点
+            "host": "127.0.0.1",
+            "port": 8765,
+            "ai_correction": False,   # HTTP 转录是否启用 AI 修正（需配置 ai_correction.api_key）
+        },
     },
     # 火山引擎 BigASR 流式识别配置（仅当 backend == "volcengine" 时生效）
     # 文档：https://www.volcengine.com/docs/6561/1354869

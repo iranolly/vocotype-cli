@@ -23,7 +23,13 @@
     "use_punc": true,
     "language": "zh",
     "hotword": "",
-    "batch_size_s": 60.0
+    "batch_size_s": 60.0,
+    "http_server": {
+      "enabled": true,
+      "host": "127.0.0.1",
+      "port": 8765,
+      "ai_correction": false
+    }
   },
   "volcengine": {
     "app_key": "",

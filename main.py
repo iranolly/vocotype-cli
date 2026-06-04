@@ -118,8 +118,8 @@ def main() -> None:
         config_path=args.config,
         on_result=None,  # 稍后设置
     )
-    worker._post_processor = post_processor
-    
+    worker.set_post_processor(post_processor)
+
     # 创建result handler（需要worker引用）
     worker.on_result = _make_result_handler(output_method, append_newline, worker)
     if args.save_dataset:

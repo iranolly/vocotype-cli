@@ -403,7 +403,10 @@ class FunASRServer:
             if hotword_str:
                 hotword_kw = hotword_str.replace(",", " ")
             else:
-                hotword_kw = ""
+                # ONNX ContextualParaformer crashes with empty hotwords
+                # (proc_hotword returns empty array → IndexError).
+                # Pass a single common char as dummy to keep model happy.
+                hotword_kw = "的"
             asr_result = self.asr_model(
                 wav_content=audio_path,
                 hotwords=hotword_kw,

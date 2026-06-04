@@ -138,7 +138,7 @@ uv pip install onnxruntime-gpu \
 复制示例配置并填入用户的信息：
 
 ```bash
-cp config.example.json config.json
+cp config.json.example config.json
 ```
 
 编辑 `config.json` 中的关键字段：
@@ -216,13 +216,14 @@ cd /path/to/vocotype-cli
 | **Push-to-Talk** | 按住 F9 录音，松开自动转录并输入到当前光标位置 |
 | **快速模式 (F9)** | 按住 F9 → 录音 → 松开 → 本地 ASR 离线转录 → 输入 |
 | **AI 润色模式 (Shift+F9)** | 同上，额外调用 AI 修正文本（去口语化、修正同音字） |
+| **Hermes 语音识别** | 内嵌 HTTP 端点（8765），Hermes Desktop 复用 VocoType 已加载模型 |
 | **系统托盘** | 后台常驻，任务栏图标，右键退出 |
 | **替换词典** | 自动替换 ASR 常见错误词（如"人工智障"→"人工智能"） |
 | **专有名词热词** | 注入 FunASR 模型级偏置 + 拼音后处理纠错（同音/近音自动修正） |
 | **异步转录** | 录音和转录分离，松开立即开始下一次录音 |
 | **启动保护** | 启动后 2 秒内忽略按键，防止幽灵事件误触 |
 | **运行时热加载** | 修改 replacement_dict.json 或 proper_nouns.json 下次录音立即生效 |
-| **GPU 加速** | 可选 CUDA 加速，RTX 2060 推理从 ~400ms 降至 ~50ms |
+| **GPU 加速** | 可选 CUDA 加速，推理延迟大幅降低 |
 | **火山引擎后端** | 可选云端流式识别（配置 volcengine 相关参数即可切换） |
 
 ---
@@ -237,7 +238,7 @@ cd /path/to/vocotype-cli
 - **启动保护期**：启动后 2 秒内忽略 F9 按键，彻底解决 `pynput` 全局钩子首次注册时的幽灵事件问题
 
 ### ASR 模型升级
-- **ONNX → PyTorch ContextualParaformer**：上游使用 ONNX 格式的 Paraformer，本 Fork 改用 PyTorch 版 ContextualParaformer，**支持 hotword 偏置参数**，专有名词识别准确率大幅提升
+- **ONNX 量化 ContextualParaformer**：使用 `funasr_onnx` 加载 ONNX 格式的量化 ContextualParaformer，显存占用大幅降低，同时支持 hotword 偏置参数，专有名词识别准确率大幅提升
 - **hotword 格式自动转换**：配置文件中用逗号分隔热词，代码自动转换为 FunASR 需要的空格分隔格式
 
 ### 后处理管道（新增模块）
@@ -261,10 +262,18 @@ ASR 输出 → 替换词典 → 专有名词拼音修正 → AI 修正（仅长�
 - 日志目录支持相对路径（基于项目根目录）
 
 ### 其他改进
-- `funasr_server.py` 移除所有 ONNX 加载代码，仅保留 PyTorch AutoModel 路径
-- `transcribe.py` 增加异步转录工作线程、转录计数器、会话大小限制
+- `funasr_server.py` 使用 `funasr_onnx` 加载 ONNX 量化模型，支持 CPU/GPU 推理
+- `transcribe.py` 增加异步转录工作线程、转录计数器、会话大小限制、内嵌 HTTP 端点
 - 删除 `脚本.md`（已过时的安装说明）
 - GPU 设备通过 `config.json` 的 `asr.device` 或环境变量 `FUNASR_DEVICE` 配置
+
+### Hermes Agent 语音识别集成
+- 新增 `app/funasr_http.py` — 可嵌入的本地 HTTP 端点，模型只加载一次
+- 新增 `hermes_funasr_stt.py` — Hermes STT command provider（HTTP 客户端）
+- 新增 `funasr_http_server.py` — VocoType 未运行时的独立 HTTP 后备服务
+- Hermes Desktop 语音识别直接复用 VocoType 已加载模型，无需重复加载
+- 转录速度从 ~14s 降至 ~0.6s（23x 提升）
+- 支持替换词典 + 专有名词 + 可选 AI 修正（由 `asr.http_server.ai_correction` 控制）
 
 ---
 
@@ -361,7 +370,13 @@ python main.py --config config.json
     "language": "zh",
     "hotword": "",
     "batch_size_s": 60.0,
-    "device": ""
+    "device": "",
+    "http_server": {
+      "enabled": true,
+      "host": "127.0.0.1",
+      "port": 8765,
+      "ai_correction": false
+    }
   },
   "volcengine": {
     "app_key": "",
@@ -430,6 +445,11 @@ python main.py --config config.json
 - `hotword` — 额外热词（逗号分隔）
 - `batch_size_s` — FunASR 批处理时长
 - `device` — 推理设备，空=CPU，`"cuda:0"`=GPU
+
+#### http_server
+- `enabled` — 是否启动 HTTP 端点（供 Hermes 复用模型）
+- `host` / `port` — 监听地址和端口
+- `ai_correction` — HTTP 转录是否启用 AI 修正（选中时走 DeepSeek，关闭时仅替换词典+专有名词）
 
 #### replacement_dict
 - `enabled` — 是否启用替换词典
@@ -606,10 +626,10 @@ python main.py --config config.json
 }
 ```
 
-需要安装 CUDA 版 PyTorch：
+需要安装 ONNX Runtime GPU 版：
 
 ```bash
-pip install torch --index-url https://download.pytorch.org/whl/cu124
+pip install onnxruntime-gpu
 ```
 
 然后运行 `nvidia-smi` 确认 CUDA 可用。
@@ -643,6 +663,32 @@ pip install torch --index-url https://download.pytorch.org/whl/cu124
 
 项目根目录下的 `logs/` 文件夹，默认日志级别为 INFO。
 
+### 如何让 Hermes Desktop 使用 VocoType 的语音识别？
+
+VocoType 启动后自动在 `http://127.0.0.1:8765` 提供 HTTP 端点，无需额外配置。
+在 Hermes 的 `config.yaml` 中设置：
+
+```yaml
+stt:
+  enabled: true
+  provider: funasr
+  providers:
+    funasr:
+      type: command
+      command: .venv/Scripts/python.exe hermes_funasr_stt.py --input {input_path} --output {output_path}
+      timeout: 120
+```
+
+转录速度从 ~14s 降至 ~0.6s。
+
+### 如何检查 HTTP 端点是否正常？
+
+```bash
+curl http://127.0.0.1:8765/health
+```
+
+返回 `"post_processor": true` 表示替换词典已加载，`"ai_correction": false` 表示 HTTP 转录不走 AI 修正。
+
 ---
 
 ## 项目结构
@@ -657,8 +703,9 @@ vocotype-cli/
 │   ├── __init__.py              # 模块导出
 │   ├── config.py                # 配置加载
 │   ├── audio_capture.py         # 音频采集
-│   ├── transcribe.py            # 转录工作线程
-│   ├── funasr_server.py         # FunASR 模型服务器
+│   ├── transcribe.py            # 转录工作线程（含内嵌 HTTP 端点）
+│   ├── funasr_server.py         # FunASR 模型服务器（ONNX）
+│   ├── funasr_http.py           # 可嵌入 HTTP 服务组件
 │   ├── funasr_config.py         # 模型配置
 │   ├── download_models.py       # 模型下载
 │   ├── logging_config.py        # 日志配置
@@ -668,6 +715,8 @@ vocotype-cli/
 │   ├── replacement_dict.py      # 替换词典模块
 │   ├── proper_nouns.py          # 专有名词 + 拼音纠错
 │   └── ai_corrector.py          # AI 修正模块（DeepSeek API）
+├── funasr_http_server.py        # 独立 HTTP 服务（VocoType 未运行时后备）
+├── hermes_funasr_stt.py         # Hermes STT command provider（HTTP 客户端）
 ├── config/
 │   ├── replacement_dict.json    # 替换词典数据
 │   └── proper_nouns.json        # 专有名词列表

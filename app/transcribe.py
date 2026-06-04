@@ -63,6 +63,7 @@ class TranscriptionWorker:
                 self.config.get("volcengine", {})
             )
             self.fun_server = None  # 不使用本地 FunASR 模型
+            self._http_server = None
             logger.info("使用 Volcengine BigASR 流式识别后端")
         else:
             from app.funasr_server import FunASRServer
@@ -72,6 +73,19 @@ class TranscriptionWorker:
             if not init_result.get("success"):
                 raise RuntimeError(f"FunASR 初始化失败: {init_result}")
             logger.info("使用 FunASR 本地离线识别后端")
+
+            # 启动本地 HTTP 端点，供 Hermes 等外部工具复用已加载的模型
+            http_cfg = self.config.get("asr", {}).get("http_server", {})
+            self._http_server = None
+            if http_cfg.get("enabled", True):
+                from app.funasr_http import FunASRHttpThread
+                self._http_server = FunASRHttpThread(
+                    self.fun_server,
+                    host=http_cfg.get("host", "127.0.0.1"),
+                    port=http_cfg.get("port", 8765),
+                    ai_correction=http_cfg.get("ai_correction", False),
+                )
+                self._http_server.start()
 
         self._running = threading.Event()
         self._recording = threading.Event()
@@ -111,6 +125,12 @@ class TranscriptionWorker:
         except Exception as exc:
             logger.debug("析构函数清理时出错: %s", exc)
 
+    def set_post_processor(self, pp) -> None:
+        """注入 PostProcessor（由 main.py 调用）。同时传播给 HTTP 端点。"""
+        self._post_processor = pp
+        if getattr(self, '_http_server', None) is not None:
+            self._http_server.set_post_processor(pp)
+
     def cleanup(self) -> None:
         """清理所有资源，包括缓冲区、音频设备和 ASR 后端。"""
         logger.debug("开始清理 TranscriptionWorker 资源")
@@ -118,10 +138,15 @@ class TranscriptionWorker:
             # 停止录音
             if self._running.is_set():
                 self.stop()
-            
+
             # 停止转录工作线程
             self._stop_transcription_worker()
-            
+
+            # 停止 HTTP 服务
+            if getattr(self, '_http_server', None) is not None:
+                self._http_server.stop()
+                self._http_server = None
+
             # 清理缓冲区
             with self._buffer_lock:
                 self._buffer.clear()
