@@ -26,13 +26,6 @@ if _SCRIPT_DIR not in sys.path:
     sys.path.insert(0, _SCRIPT_DIR)
 
 warnings.filterwarnings("ignore", category=UserWarning, module="jieba._compat")
-os.environ.setdefault("OMP_NUM_THREADS", "8")
-os.environ.setdefault("FUNASR_DEVICE", "cpu")
-os.environ.setdefault("FUNASR_USE_VAD", "false")
-os.environ.setdefault("FUNASR_USE_PUNC", "true")
-
-from app.funasr_server import FunASRServer
-from app.funasr_http import FunASRHttpThread
 
 logging.basicConfig(
     level=logging.INFO,
@@ -86,6 +79,16 @@ def main():
         except Exception:
             pass
 
+    # 设置默认值（仅在未通过环境变量或配置设置时生效）
+    os.environ.setdefault("OMP_NUM_THREADS", "8")
+    os.environ.setdefault("FUNASR_DEVICE", "cpu")
+    os.environ.setdefault("FUNASR_USE_VAD", "false")
+    os.environ.setdefault("FUNASR_USE_PUNC", "true")
+
+    # 延迟导入：等 env 设置完毕再加载 FunASRServer（其模块级 setdefault 不会覆盖已设值）
+    from app.funasr_server import FunASRServer
+    from app.funasr_http import FunASRHttpThread
+
     logger.info("正在初始化 FunASR 模型（仅此一次）...")
     asr = FunASRServer()
     result = asr.initialize()
@@ -102,7 +105,8 @@ def main():
         http_cfg = {}
         try:
             from app.config import load_config
-            cfg = load_config(args.config)
+            _cfg_path = args.config or os.path.join(_SCRIPT_DIR, "config.json")
+            cfg = load_config(_cfg_path)
             http_cfg = cfg.get("asr", {}).get("http_server", {})
         except Exception:
             pass
