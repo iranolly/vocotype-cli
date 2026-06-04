@@ -1,0 +1,39 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate release notes
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "## What's Changed" > release_notes.md
+          echo "" >> release_notes.md
+          git log "$(git tag --sort=-version:refname | head -2 | tail -1)..HEAD" \
+            --oneline --no-decorate --format="* %s (%h)" >> release_notes.md 2>/dev/null || \
+          git log --oneline --no-decorate --format="* %s (%h)" >> release_notes.md
+
+          # Append changelog if it has a matching entry
+          if grep -q "\[$VERSION\]" CHANGELOG.md 2>/dev/null; then
+            echo "" >> release_notes.md
+            echo "---" >> release_notes.md
+            echo "" >> release_notes.md
+            awk "/\[$VERSION\]/{flag=1; next} /^## /{flag=0} flag" CHANGELOG.md >> release_notes.md
+          fi
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: release_notes.md
+          generate_release_notes: false
