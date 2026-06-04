@@ -17,3 +17,5 @@ todo.md
 # Local config (has user's API keys)
 config.json
 
+.hermes*
+.hermes-tmp*/

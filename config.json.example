@@ -1,0 +1,73 @@
+{
+  "hotkeys": {
+    "quick": "f9",
+    "long": "shift+f9"
+  },
+  "audio": {
+    "sample_rate": 16000,
+    "block_ms": 20,
+    "device": null,
+    "max_session_bytes": 20971520
+  },
+  "vad": {
+    "start_threshold": 0.02,
+    "stop_threshold": 0.01,
+    "min_speech_ms": 300,
+    "min_silence_ms": 200,
+    "pad_ms": 200
+  },
+  "backend": "funasr",
+  "asr": {
+    "device": "cuda:0",
+    "use_vad": false,
+    "use_punc": true,
+    "language": "zh",
+    "hotword": "",
+    "batch_size_s": 60.0
+  },
+  "volcengine": {
+    "app_key": "",
+    "access_key": "",
+    "resource_id": "volc.bigasr.sauc.duration",
+    "url": "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel",
+    "model_name": "bigmodel",
+    "chunk_ms": 100,
+    "enable_punc": true,
+    "enable_itn": true
+  },
+  "output": {
+    "dedupe": true,
+    "max_history": 5,
+    "min_chars": 1,
+    "method": "auto",
+    "append_newline": false
+  },
+  "logging": {
+    "dir": "logs",
+    "level": "INFO"
+  },
+  "replacement_dict": {
+    "enabled": true,
+    "path": "config/replacement_dict.json"
+  },
+  "proper_nouns": {
+    "enabled": true,
+    "path": "config/proper_nouns.json"
+  },
+  "ai_correction": {
+    "enabled": true,
+    "provider": "remote",
+    "endpoint": "https://api.deepseek.com/v1/chat/completions",
+    "api_key": "YOUR_API_KEY_HERE",
+    "model": "deepseek-v4-flash",
+    "timeout_ms": 15000,
+    "min_chars": 8,
+    "max_tokens": 8192,
+    "temperature": 0.0,
+    "top_p": 0.9,
+    "extra_body": {
+      "thinking": {"type": "disabled"}
+    },
+    "system_prompt": "你是一个\"语音转录修正官\"。你的任务是，把我（语音转录的、可能包含错别字、同音字以及自我修正）的文本，立刻修正成一段准确反映我最终意图的文字。\n\n核心规则：\n\n【识别并执行修正】(最关键) 必须识别出口语中的\"修正指令\"，比如\"啊不对\"、\"算了\"、\"改成\"、\"不不不\"、\"我的意思是\"等等。当识别到这些词时，你必须删除在这之前的错误信息，只保留用户修正后的最终内容。\n\n【修正拼写错误】 必须修正所有因语音识别导致的明显错别字和同音字。(例如： \"今天天气\" 识别成 \"今天舔起\"）。\n\n【保持句子结构】 保持我原来的句子结构和长度，只在必要时添加标点符号（主要是句末的句号或问号）。\n\n【绝对保持最终原意】 你只是在做\"校对\"和\"执行修正\"，绝对不要修改我最终想表达的意思。\n\n【直接输出】 不要解释你的修改过程，不要和我聊天，只给我修正后的最终文本。"
+  }
+}

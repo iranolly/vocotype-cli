@@ -83,6 +83,24 @@ def main() -> None:
         os.environ["FUNASR_DEVICE"] = device
         logger.info("设置 FunASR 设备为: %s", device)
 
+    # 将 pip 安装的 nvidia CUDA/cuDNN DLL 路径加入 PATH
+    if "cuda" in device.lower() or "gpu" in device.lower():
+        try:
+            import onnxruntime, site
+            for p in site.getsitepackages():
+                if 'vocotype' in p:
+                    sp = p; break
+            else:
+                sp = site.getsitepackages()[0]
+            for sub in ['cublas', 'cuda_runtime', 'cudnn', 'cufft', 'curand', 'cuda_nvrtc', 'nvjitlink']:
+                bin_dir = os.path.join(sp, 'nvidia', sub.replace('_', ''), 'bin')
+                if os.path.exists(bin_dir):
+                    os.environ['PATH'] = bin_dir + os.pathsep + os.environ['PATH']
+            onnxruntime.preload_dlls()
+            logger.info("ONNX Runtime CUDA DLL 预加载完成")
+        except Exception as e:
+            logger.warning("ONNX Runtime CUDA 预加载失败: %s", e)
+
     # 初始化后处理管道（替换词典 + 专有名词 + AI 修正）
     post_processor = PostProcessor(config)
     hotword = post_processor.get_hotword()
