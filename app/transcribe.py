@@ -68,7 +68,9 @@ class TranscriptionWorker:
         else:
             from app.funasr_server import FunASRServer
             self._volcengine_client = None
-            self.fun_server = FunASRServer()
+            self.fun_server = FunASRServer(
+                device_from_config=self.config.get("asr", {}).get("device")
+            )
             init_result = self.fun_server.initialize()
             if not init_result.get("success"):
                 raise RuntimeError(f"FunASR 初始化失败: {init_result}")
