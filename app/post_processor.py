@@ -68,4 +68,4 @@ class PostProcessor:
         """去除文本末尾的标点符号（。！？!?，,；;等）。"""
         if not text:
             return text
-        return text.rstrip("。！!，,；;：:、…～~")
+        return text.rstrip("。！!？?，,；;：:、…～~.")

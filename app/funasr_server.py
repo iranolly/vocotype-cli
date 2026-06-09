@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 
 class FunASRServer:
-    def __init__(self):
+    def __init__(self, device_from_config=None):
         self.asr_model = None
         self.vad_model = None
         self.punc_model = None
@@ -49,6 +49,7 @@ class FunASRServer:
             "punc": MODELS["punc"]["name"],
         }
 
+        self._config_device = device_from_config
         self.device = self._select_device()
         logger.info(
             "FunASR服务器初始化，模型版本=%s，设备=%s",
@@ -108,6 +109,10 @@ class FunASRServer:
         if env_device:
             logger.info("使用环境变量指定的设备: %s", env_device)
             return env_device
+
+        if self._config_device:
+            logger.info("使用配置文件指定的设备: %s", self._config_device)
+            return self._config_device
 
         return "cpu"
 

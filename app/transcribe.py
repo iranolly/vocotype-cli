@@ -423,8 +423,15 @@ class TranscriptionWorker:
             wf.setsampwidth(2)
             wf.setframerate(sample_rate)
             wf.writeframes(samples.tobytes())
-        os.replace(tmp_path, recent_path)
-        self.last_segment_path = recent_path
+
+        # Windows 上 os.replace 在目标被锁定时抛 PermissionError（另一进程/Defender 扫描等）
+        # 失败时降级到临时文件，不阻塞转写流程
+        try:
+            os.replace(tmp_path, recent_path)
+        except OSError:
+            self.last_segment_path = Path(tmp_path)
+        else:
+            self.last_segment_path = recent_path
 
     def _transcribe_once(self, samples: np.ndarray) -> None:
         # 每次转录前热加载替换词典和专有名词（运行时修改 JSON 立即生效）

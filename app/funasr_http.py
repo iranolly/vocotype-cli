@@ -146,8 +146,12 @@ class FunASRHttpThread:
     def _handle_transcribe(self, audio_path: str, language: str = "zh", hotword: str = "") -> dict:
         """执行一次转录，返回结果字典。"""
         self._request_count += 1
+        import sys as _sys
+        _sys.stderr.write("[funasr-http-DEBUG] _handle_transcribe called, request_count=%d, audio_path=%s\n" % (self._request_count, audio_path))
+        _sys.stderr.flush()
 
         if not os.path.exists(audio_path):
+            logger.warning("HTTP 转录 [#%d]: 音频文件不存在 → %s", self._request_count, audio_path)
             return {"success": False, "error": f"音频文件不存在: {audio_path}"}
 
         t0 = time.time()
@@ -168,6 +172,7 @@ class FunASRHttpThread:
         try:
             result = self._asr.transcribe_audio(audio_path, options=options)
         except Exception:
+            logger.error("HTTP 转录 [#%d]: ASR 异常\n%s", self._request_count, traceback.format_exc())
             return {
                 "success": False,
                 "error": traceback.format_exc(),
@@ -177,6 +182,7 @@ class FunASRHttpThread:
         elapsed = round(time.time() - t0, 2)
 
         if not result.get("success"):
+            logger.warning("HTTP 转录 [#%d]: ASR 失败 → %s", self._request_count, result.get("error", "未知错误"))
             return {
                 "success": False,
                 "error": result.get("error", "未知错误"),
@@ -189,11 +195,18 @@ class FunASRHttpThread:
         # 后处理：替换词典 + 专有名词（始终），AI 修正（仅当 ai_correction=true）
         if self._post_processor is not None and text:
             try:
+                logger.info("后处理前原始文本: \"%s\"", text[:100])
                 corrected = self._post_processor.process(text, long_mode=self._ai_correction)
                 if corrected and corrected != text:
                     tag = "AI修正" if self._ai_correction else "后处理"
                     logger.info("%s [#%d]: \"%s\" → \"%s\"", tag, self._request_count, text[:50], corrected[:50])
                     text = corrected
+                else:
+                    logger.info("后处理无变更: \"%s\" (replacement_dict_enabled=%s, proper_nouns_enabled=%s, ai_correction=%s)",
+                                 text[:50],
+                                 self._post_processor.replacement_dict.enabled if hasattr(self._post_processor, 'replacement_dict') else '?',
+                                 self._post_processor.proper_nouns.enabled if hasattr(self._post_processor, 'proper_nouns') else '?',
+                                 self._ai_correction)
             except Exception as exc:
                 logger.warning("后处理失败 [#%d]: %s，使用原始文本", self._request_count, exc)
 

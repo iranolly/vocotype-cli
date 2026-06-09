@@ -5,9 +5,12 @@
   "definately": "definitely",
   "vocal type":"vocotype",
   "focal type":"vocotype",
+  "focto type":"vocotype",
   "人工智障": "人工智能",
   "神经网落": "神经网络",
   "机器学西": "机器学习",
   "深度学西": "深度学习",
-  "自注意力基值": "自注意力机制"
+  "自注意力基值": "自注意力机制",
+  "hdset":"hindsight",
+  "hunset":"hindsight"
 }
