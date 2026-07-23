@@ -198,14 +198,18 @@ def main() -> None:
         try:
             def _on_exit(icon, item):
                 """退出托盘图标（必须先 stop() 让图标消失，再让 run() 返回）"""
+                logger.info("用户从托盘菜单选择退出")
                 icon.stop()
 
+            # 注意：不要把「退出」设为 default=True。
+            # pystray 在 Windows 上「单击」托盘图标会触发 default 菜单项，
+            # 旧代码 default=True 绑在退出上，单击托盘就会正常退出，看起来像闪退。
             _tray_icon = pystray.Icon(
                 "vocotype",
                 _build_tray_icon(),
-                "VocoType - 按住 F9 录音",
+                "VocoType - 按住 F9 录音，右键 → 退出",
                 menu=pystray.Menu(
-                    pystray.MenuItem("退出", _on_exit, default=True)
+                    pystray.MenuItem("退出", _on_exit),
                 ),
             )
             _has_tray = True
